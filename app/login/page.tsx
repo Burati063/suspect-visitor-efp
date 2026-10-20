@@ -14,7 +14,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const redirectPath = searchParams.get("redirect") || "/";
 
-  const [phone, setPhone] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -22,25 +22,37 @@ function LoginForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (!phone || !password) {
+    if (!identifier.trim() || !password) {
       setError(t("missingFields"));
       return;
     }
     setLoading(true);
 
-    // Sign in with phone + password. Supabase supports phone auth via email-like
-    // alias only if configured. We use an email derived from phone as a fallback.
-    const email = phone.includes("@") ? phone : `${phone}@svs.local`;
+    // Accept any of:
+    //   admin@svs.local  → used as-is
+    //   admin            → becomes admin@svs.local
+    //   0911000000       → becomes 0911000000@svs.local
+    const clean = identifier.trim().replace(/[\s\-]/g, "");
+    const email = clean.includes("@") ? clean : `${clean}@svs.local`;
 
     const supabase = createClient();
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data, error: signInError } = await supabase.auth.signInWithPassword(
+      { email, password }
+    );
 
     if (signInError || !data.user) {
       setLoading(false);
-      setError(t("loginError"));
+      // Show the real error message to help with diagnosis
+      const msg = signInError?.message ?? "No user returned";
+      if (msg.toLowerCase().includes("invalid login")) {
+        setError("Wrong phone/email or password. Try again.");
+      } else if (msg.toLowerCase().includes("email not confirmed")) {
+        setError(
+          "Account not confirmed. Ask the admin to confirm your account in Supabase → Authentication → Users."
+        );
+      } else {
+        setError(`Login failed: ${msg}`);
+      }
       return;
     }
 
@@ -58,6 +70,7 @@ function LoginForm() {
         : role === "admin"
         ? "/admin"
         : "/visitor";
+
     router.push(target);
     router.refresh();
   }
@@ -69,6 +82,7 @@ function LoginForm() {
       </header>
       <main className="flex-1 flex flex-col items-center justify-center px-4 pb-8">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 sm:p-8">
+          {/* Logo + branding */}
           <div className="flex flex-col items-center text-center mb-6">
             <Image
               src="/logo.png"
@@ -77,28 +91,28 @@ function LoginForm() {
               height={84}
               priority
             />
-            <h1 className="mt-3 text-lg font-bold text-navy">
-              {t("police")}
-            </h1>
-            <p className="text-sm text-gold-dark font-semibold">
-              {t("bureau")}
-            </p>
+            <h1 className="mt-3 text-lg font-bold text-navy">{t("police")}</h1>
+            <p className="text-sm text-gold-dark font-semibold">{t("bureau")}</p>
             <p className="mt-3 text-xs text-slate-500">{t("loginPrompt")}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
-                {t("phone")} / {t("email")}
+                {t("phone")} / Email
               </label>
               <input
                 type="text"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-navy"
-                placeholder={t("phone")}
+                placeholder="0911000000  or  admin"
                 autoComplete="username"
+                autoCapitalize="none"
               />
+              <p className="mt-1 text-xs text-slate-400">
+                Enter your phone number or username
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -109,15 +123,15 @@ function LoginForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-navy"
-                placeholder={t("password")}
+                placeholder="••••••"
                 autoComplete="current-password"
               />
             </div>
 
             {error && (
-              <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">
+              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                 {error}
-              </p>
+              </div>
             )}
 
             <button
@@ -131,7 +145,10 @@ function LoginForm() {
 
           <p className="mt-5 text-center text-sm text-slate-600">
             {t("noAccount")}{" "}
-            <Link href="/signup" className="font-semibold text-navy hover:underline">
+            <Link
+              href="/signup"
+              className="font-semibold text-navy hover:underline"
+            >
               {t("signup")}
             </Link>
           </p>
