@@ -17,83 +17,60 @@ export default function ScanPage() {
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [suspect, setSuspect] = useState<{ name: string } | null>(null);
-  const [visitorName, setVisitorName] = useState("");
   const [error, setError] = useState("");
   const [ticket, setTicket] = useState<{
     ticket_number: string;
     suspectName: string;
-    visitorName: string;
+    visitorQr: string;    // the scanned QR value = visitor identity
     createdAt: string;
     expiry: string;
-    qrData: string;
   } | null>(null);
 
+  // Load suspect name on mount — no auth required
   useEffect(() => {
     async function init() {
       const supabase = createClient();
+      const { data: sus, error: fetchError } = await supabase
+        .from("suspects")
+        .select("name")
+        .eq("id", suspectId)
+        .single();
 
-      // Get the logged-in user first so we can filter the profile query
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setError(t("loginError"));
-        setPhase("error");
-        return;
-      }
-
-      const [{ data: sus }, { data: profile }] = await Promise.all([
-        supabase.from("suspects").select("name").eq("id", suspectId).single(),
-        supabase
-          .from("profiles")
-          .select("full_name")
-          .eq("id", user.id)
-          .single(),
-      ]);
-
-      if (!sus) {
+      if (fetchError || !sus) {
         setError(t("noSuspects"));
         setPhase("error");
         return;
       }
       setSuspect(sus as { name: string });
-      setVisitorName(
-        (profile as { full_name: string } | null)?.full_name ?? t("unknown")
-      );
       setPhase("scanning");
     }
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suspectId]);
 
+  // Called when the QR scanner decodes a value
   async function handleScan(qrData: string) {
     if (phase !== "scanning") return;
     setPhase("creating");
+
     const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setError(t("loginError"));
-      setPhase("error");
-      return;
-    }
-
     const now = Date.now();
+
+    // Ticket number: unique ID for this visit
     const ticket_number = `SVS-${now}-${Math.random()
       .toString(36)
       .slice(2, 8)
       .toUpperCase()}`;
+
+    // Ticket valid for 30 minutes
     const ticket_expiry = new Date(now + 30 * 60 * 1000).toISOString();
 
+    // Store visit: qr_code_data IS the visitor identifier (no user account needed)
     const { data: visit, error: insertError } = await supabase
       .from("visits")
       .insert({
-        suspect_id: suspectId,
-        visitor_id: user.id,
-        qr_code_data: qrData,
+        suspect_id:   suspectId,
+        qr_code_data: qrData,        // the scanned digits/letters = who the visitor is
         ticket_number,
         ticket_expiry,
         ticket_status: "valid",
@@ -110,10 +87,9 @@ export default function ScanPage() {
     setTicket({
       ticket_number,
       suspectName: suspect?.name ?? t("unknown"),
-      visitorName,
-      createdAt: (visit as { visited_at: string }).visited_at,
-      expiry: ticket_expiry,
-      qrData,
+      visitorQr:   qrData,
+      createdAt:   (visit as { visited_at: string }).visited_at,
+      expiry:      ticket_expiry,
     });
     setPhase("done");
   }
@@ -122,17 +98,23 @@ export default function ScanPage() {
     <div>
       <button
         onClick={() => router.back()}
-        className="mb-4 text-sm text-navy font-semibold hover:underline"
+        className="mb-4 text-sm text-navy font-semibold hover:underline flex items-center gap-1"
       >
         ← {t("back")}
       </button>
 
+      {/* Loading suspect */}
       {phase === "loading" && (
-        <p className="text-center text-slate-400 py-10">{t("loading")}</p>
+        <div className="text-center py-16">
+          <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-navy border-t-transparent" />
+          <p className="mt-4 text-slate-500">{t("loading")}</p>
+        </div>
       )}
 
+      {/* Error */}
       {phase === "error" && (
         <div className="bg-white rounded-xl shadow p-6 text-center">
+          <div className="text-4xl mb-3">⚠️</div>
           <p className="text-red-600 font-medium mb-4">{error}</p>
           <button
             onClick={() => router.push("/visitor")}
@@ -143,59 +125,75 @@ export default function ScanPage() {
         </div>
       )}
 
+      {/* QR Scanner */}
       {phase === "scanning" && (
         <div>
-          <div className="text-center mb-4">
-            <h1 className="text-lg font-bold text-navy">{t("scanQr")}</h1>
+          <div className="text-center mb-5">
+            <h1 className="text-xl font-bold text-navy">{t("scanQr")}</h1>
             {suspect && (
-              <p className="text-sm text-slate-500">
-                {t("scanningFor")}: <span className="font-semibold text-navy">{suspect.name}</span>
+              <p className="text-sm text-slate-500 mt-1">
+                {t("scanningFor")}:{" "}
+                <span className="font-bold text-navy">{suspect.name}</span>
               </p>
             )}
+            <p className="text-xs text-slate-400 mt-2 px-4">
+              {t("pointCamera")}
+            </p>
           </div>
-          <div className="bg-white rounded-xl shadow p-3">
+
+          <div className="bg-white rounded-2xl shadow-lg p-4">
             <QrScanner onScan={handleScan} active={phase === "scanning"} />
           </div>
-          <p className="text-center text-xs text-slate-500 mt-3 px-4">
-            {t("pointCamera")}
-          </p>
+
+          <div className="mt-4 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-xs text-blue-700 text-center">
+            {t("cameraPermission")}
+          </div>
         </div>
       )}
 
+      {/* Saving */}
       {phase === "creating" && (
         <div className="text-center py-16">
           <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-navy border-t-transparent" />
-          <p className="mt-4 text-navy font-semibold">{t("loading")}</p>
+          <p className="mt-4 text-navy font-semibold">Saving visit…</p>
         </div>
       )}
 
+      {/* Ticket displayed after successful scan */}
       {phase === "done" && ticket && (
         <div>
-          <div className="text-center mb-4">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-green-100 text-green-600 text-3xl mb-2">
+          {/* Success banner */}
+          <div className="text-center mb-5">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-100 text-green-600 text-4xl mb-2">
               ✓
             </div>
             <h1 className="text-lg font-bold text-green-700">{t("visitCreated")}</h1>
             <p className="text-xs text-slate-500 mt-1 px-4">{t("qrDataStored")}</p>
           </div>
+
+          {/* Ticket card */}
           <Ticket
             ticketNumber={ticket.ticket_number}
             suspectName={ticket.suspectName}
-            visitorName={ticket.visitorName}
+            visitorName={ticket.visitorQr}   /* QR value shown as visitor */
             createdAt={ticket.createdAt}
             expiry={ticket.expiry}
           />
-          <div className="mt-4 text-center">
-            <p className="text-xs text-slate-400 mb-2 break-all px-4">
-              {t("qrCode")}: <span className="font-mono">{ticket.qrData}</span>
+
+          {/* Raw QR value */}
+          <div className="mt-4 bg-white rounded-xl shadow px-4 py-3 text-center">
+            <p className="text-xs text-slate-400 mb-1">{t("qrCode")} (Visitor ID)</p>
+            <p className="font-mono font-bold text-navy text-lg break-all">
+              {ticket.visitorQr}
             </p>
-            <button
-              onClick={() => router.push("/visitor")}
-              className="rounded-lg bg-navy text-white px-6 py-3 font-semibold w-full"
-            >
-              {t("home")}
-            </button>
           </div>
+
+          <button
+            onClick={() => router.push("/visitor")}
+            className="mt-4 rounded-xl bg-navy text-white px-6 py-4 font-bold w-full text-base active:scale-95 transition-transform"
+          >
+            {t("home")}
+          </button>
         </div>
       )}
     </div>

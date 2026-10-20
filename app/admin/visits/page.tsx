@@ -6,15 +6,12 @@ import { useTranslation } from "@/lib/i18n/LanguageProvider";
 
 interface VisitRow {
   id: string;
-  qr_code_data: string;
+  qr_code_data: string;   // This IS the visitor identity
   visited_at: string;
   ticket_number: string;
   ticket_expiry: string;
   ticket_status: string;
-  // Supabase join can return array or single object depending on FK direction;
-  // use unknown and narrow below
-  suspects: unknown;
-  profiles: unknown;
+  suspects: unknown;       // joined
 }
 
 export default function AdminVisitsPage() {
@@ -29,29 +26,26 @@ export default function AdminVisitsPage() {
     const supabase = createClient();
     const { data } = await supabase
       .from("visits")
-      .select(
-        "id, qr_code_data, visited_at, ticket_number, ticket_expiry, ticket_status, suspects(name), profiles(full_name)"
-      )
+      .select("id, qr_code_data, visited_at, ticket_number, ticket_expiry, ticket_status, suspects(name)")
       .order("visited_at", { ascending: false })
       .limit(500);
     setVisits((data as VisitRow[]) ?? []);
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetchVisits();
-  }, [fetchVisits]);
+  useEffect(() => { fetchVisits(); }, [fetchVisits]);
+
+  function getSuspectName(v: VisitRow) {
+    const s = v.suspects;
+    return (Array.isArray(s)
+      ? (s[0] as { name: string } | undefined)?.name
+      : (s as { name: string } | null)?.name) ?? t("unknown");
+  }
 
   const filtered = visits.filter((v) => {
     if (search) {
       const q = search.toLowerCase();
-      const suspectName = (Array.isArray(v.suspects)
-        ? (v.suspects[0] as { name: string } | undefined)?.name
-        : (v.suspects as { name: string } | null)?.name) ?? "";
-      const visitorName = (Array.isArray(v.profiles)
-        ? (v.profiles[0] as { full_name: string } | undefined)?.full_name
-        : (v.profiles as { full_name: string } | null)?.full_name) ?? "";
-      const hay = `${suspectName} ${visitorName} ${v.ticket_number}`.toLowerCase();
+      const hay = `${getSuspectName(v)} ${v.qr_code_data} ${v.ticket_number}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     if (dateFilter) {
@@ -62,14 +56,22 @@ export default function AdminVisitsPage() {
   });
 
   function isExpired(v: VisitRow) {
-    if (v.ticket_status === "expired") return true;
     return new Date(v.ticket_expiry).getTime() < Date.now();
   }
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-navy mb-6">{t("visitHistoryTitle")}</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-navy">{t("visitHistoryTitle")}</h1>
+        <button
+          onClick={fetchVisits}
+          className="text-sm px-4 py-2 rounded-lg bg-navy text-white hover:bg-navy-600"
+        >
+          ↻ {t("loading").replace("...", "")} Refresh
+        </button>
+      </div>
 
+      {/* Filters */}
       <div className="bg-white rounded-xl shadow p-4 mb-4 flex flex-wrap gap-3">
         <input
           type="text"
@@ -84,6 +86,14 @@ export default function AdminVisitsPage() {
           onChange={(e) => setDateFilter(e.target.value)}
           className="rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy"
         />
+        {(search || dateFilter) && (
+          <button
+            onClick={() => { setSearch(""); setDateFilter(""); }}
+            className="text-sm text-slate-500 hover:text-red-600 px-2"
+          >
+            ✕ Clear
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl shadow overflow-hidden">
@@ -98,8 +108,8 @@ export default function AdminVisitsPage() {
                 <tr>
                   <th className="text-left px-4 py-3 font-medium">{t("ticketNumber")}</th>
                   <th className="text-left px-4 py-3 font-medium">{t("suspectName")}</th>
-                  <th className="text-left px-4 py-3 font-medium">{t("visitorName")}</th>
-                  <th className="text-left px-4 py-3 font-medium">{t("qrCode")}</th>
+                  {/* QR code data = visitor identity */}
+                  <th className="text-left px-4 py-3 font-medium">{t("visitorName")} (QR)</th>
                   <th className="text-left px-4 py-3 font-medium">{t("timestamp")}</th>
                   <th className="text-left px-4 py-3 font-medium">{t("expiryTime")}</th>
                   <th className="text-left px-4 py-3 font-medium">{t("status")}</th>
@@ -109,17 +119,9 @@ export default function AdminVisitsPage() {
                 {filtered.map((v) => (
                   <tr key={v.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs">{v.ticket_number}</td>
-                    <td className="px-4 py-3 font-medium text-navy">
-                      {(Array.isArray(v.suspects)
-                        ? (v.suspects[0] as { name: string } | undefined)?.name
-                        : (v.suspects as { name: string } | null)?.name) ?? t("unknown")}
-                    </td>
-                    <td className="px-4 py-3">
-                      {(Array.isArray(v.profiles)
-                        ? (v.profiles[0] as { full_name: string } | undefined)?.full_name
-                        : (v.profiles as { full_name: string } | null)?.full_name) ?? t("unknown")}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500 max-w-[120px] truncate">
+                    <td className="px-4 py-3 font-medium text-navy">{getSuspectName(v)}</td>
+                    {/* The scanned QR value is displayed as the visitor */}
+                    <td className="px-4 py-3 font-mono text-sm font-semibold text-navy">
                       {v.qr_code_data}
                     </td>
                     <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
@@ -129,13 +131,7 @@ export default function AdminVisitsPage() {
                       {new Date(v.ticket_expiry).toLocaleString()}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`status-badge ${
-                          isExpired(v)
-                            ? "bg-red-100 text-red-700"
-                            : "bg-green-100 text-green-700"
-                        }`}
-                      >
+                      <span className={`status-badge ${isExpired(v) ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
                         {isExpired(v) ? t("expired") : t("valid")}
                       </span>
                     </td>
@@ -143,6 +139,9 @@ export default function AdminVisitsPage() {
                 ))}
               </tbody>
             </table>
+            <p className="text-xs text-slate-400 px-4 py-2 border-t border-slate-100">
+              {filtered.length} records
+            </p>
           </div>
         )}
       </div>
