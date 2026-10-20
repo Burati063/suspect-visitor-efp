@@ -1,29 +1,45 @@
 import { NextResponse } from "next/server";
 
 /**
- * Returns Supabase public config to the browser.
+ * Serves Supabase public credentials to the browser.
  *
- * Only NEXT_PUBLIC_SUPABASE_URL was renamed to _SUPABASE_URL in Vercel
- * to avoid the "public prefix" warning.
- * The anon key stays as NEXT_PUBLIC_SUPABASE_ANON_KEY (already public).
+ * Tries every naming variant so it works regardless of how the env vars
+ * were named in Vercel (with or without NEXT_PUBLIC_ prefix, with _ prefix, etc.)
  */
 export async function GET() {
-  // Try _SUPABASE_URL first, fall back to NEXT_PUBLIC_SUPABASE_URL
-  const url = process.env._SUPABASE_URL
-    ?? process.env.NEXT_PUBLIC_SUPABASE_URL
-    ?? "";
+  // Try every possible name the URL might have been saved as
+  const url =
+    process.env._SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    "";
 
-  // Anon key stays as NEXT_PUBLIC_ — already accessible in browser,
-  // but we read it here too so the client only needs one fetch.
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  // Try every possible name the anon key might have been saved as
+  const key =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env._SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_KEY ||
+    "";
+
+  // Debug: log what was found (visible in Vercel function logs)
+  console.log("[SVS /api/config]", {
+    urlFound: !!url,
+    keyFound: !!key,
+    urlPreview: url ? url.slice(0, 30) + "..." : "MISSING",
+  });
 
   if (!url || !key) {
     return NextResponse.json(
       {
         error:
-          "Supabase env vars not configured. " +
-          `URL present: ${!!url}, KEY present: ${!!key}. ` +
-          "Set _SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel → Settings → Environment Variables.",
+          `Supabase configuration missing on server. ` +
+          `URL found: ${!!url}, KEY found: ${!!key}. ` +
+          `Go to Vercel → your project → Settings → Environment Variables ` +
+          `and make sure these are set: ` +
+          `_SUPABASE_URL (your Supabase project URL) and ` +
+          `NEXT_PUBLIC_SUPABASE_ANON_KEY (your anon/public key). ` +
+          `Then redeploy.`,
       },
       { status: 500 }
     );
