@@ -86,10 +86,12 @@ export const translations = {
 
     // Status
     status: "Status",
+    available: "Available",
     notHere: "Not Here",
     atCourt: "At Court",
     released: "Released",
     transferred: "Transferred",
+    notAvailableMessage: "This suspect is currently not available for visits.",
 
     // Visit / ticket
     visits: "Visits",
@@ -218,10 +220,12 @@ export const translations = {
 
     // Status
     status: "ሁኔታ",
+    available: "ይገኛሉ",
     notHere: "እዚህ የሉም",
     atCourt: "በፍርድ ቤት",
     released: "ተፈቷል",
     transferred: "ተዛውሯል",
+    notAvailableMessage: "ይህ ተጠርጣሪ በአሁኑ ጊዜ ለጎብኚዎች አይገኝም።",
 
     // Visit / ticket
     visits: "ጎብኚዎች",

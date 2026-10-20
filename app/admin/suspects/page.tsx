@@ -6,45 +6,63 @@ import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import type { Gender, Suspect, SuspectStatus } from "@/lib/types";
 import { STATUS_OPTIONS } from "@/lib/types";
+import type { TranslationKey } from "@/lib/i18n/translations";
 
+// Status badge styling — "available" is green and prominent
 const statusClass: Record<SuspectStatus, string> = {
-  not_here: "status-badge status-not_here",
-  at_court: "status-badge status-at_court",
-  released: "status-badge status-released",
+  available:   "status-badge bg-green-100 text-green-800 border border-green-300",
+  not_here:    "status-badge status-not_here",
+  at_court:    "status-badge status-at_court",
+  released:    "status-badge bg-purple-100 text-purple-800",
   transferred: "status-badge status-transferred",
 };
 
+function statusLabel(t: (k: TranslationKey) => string, s: SuspectStatus) {
+  switch (s) {
+    case "available":   return t("available");
+    case "not_here":    return t("notHere");
+    case "at_court":    return t("atCourt");
+    case "released":    return t("released");
+    case "transferred": return t("transferred");
+    default: return s;
+  }
+}
+
 export default function AdminSuspectsPage() {
   const t = useTranslation();
-  const [suspects, setSuspects] = useState<Suspect[]>([]);
+  const [suspects,    setSuspects]    = useState<Suspect[]>([]);
   const [visitCounts, setVisitCounts] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [genderFilter, setGenderFilter] = useState<"all" | Gender>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | SuspectStatus>("all");
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState("");
+  const [search,      setSearch]      = useState("");
+  const [genderFilter,setGenderFilter]= useState<"all" | Gender>("all");
+  const [statusFilter,setStatusFilter]= useState<"all" | SuspectStatus>("all");
+  const [updatingId,  setUpdatingId]  = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const supabase = createClient();
-    const [{ data: sus }, { data: visits }] = await Promise.all([
-      supabase.from("suspects").select("*").order("created_at", { ascending: false }),
-      supabase.from("visits").select("suspect_id"),
-    ]);
-
-    setSuspects((sus as Suspect[]) ?? []);
-    const counts: Record<string, number> = {};
-    (visits ?? []).forEach((v) => {
-      const id = (v as { suspect_id: string }).suspect_id;
-      counts[id] = (counts[id] ?? 0) + 1;
-    });
-    setVisitCounts(counts);
+    setError("");
+    try {
+      const supabase = createClient();
+      const [{ data: sus, error: susErr }, { data: visits }] = await Promise.all([
+        supabase.from("suspects").select("*").order("created_at", { ascending: false }),
+        supabase.from("visits").select("suspect_id"),
+      ]);
+      if (susErr) { setError(susErr.message); setLoading(false); return; }
+      setSuspects((sus as Suspect[]) ?? []);
+      const counts: Record<string, number> = {};
+      (visits ?? []).forEach((v) => {
+        const id = (v as { suspect_id: string }).suspect_id;
+        counts[id] = (counts[id] ?? 0) + 1;
+      });
+      setVisitCounts(counts);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Connection error");
+    }
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   async function updateStatus(id: string, status: SuspectStatus) {
     setUpdatingId(id);
@@ -53,15 +71,12 @@ export default function AdminSuspectsPage() {
       .from("suspects")
       .update({ status, updated_at: new Date().toISOString() })
       .eq("id", id);
-    setSuspects((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status } : s))
-    );
+    setSuspects((prev) => prev.map((s) => s.id === id ? { ...s, status } : s));
     setUpdatingId(null);
   }
 
   const filtered = suspects.filter((s) => {
-    if (search && !s.name.toLowerCase().includes(search.toLowerCase()))
-      return false;
+    if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false;
     if (genderFilter !== "all" && s.gender !== genderFilter) return false;
     if (statusFilter !== "all" && s.status !== statusFilter) return false;
     return true;
@@ -79,6 +94,13 @@ export default function AdminSuspectsPage() {
         </Link>
       </div>
 
+      {/* Config error banner */}
+      {error && (
+        <div className="mb-4 bg-red-50 border border-red-300 rounded-xl px-4 py-3 text-sm text-red-700">
+          <strong>Error:</strong> {error}
+        </div>
+      )}
+
       {/* Filters */}
       <div className="bg-white rounded-xl shadow p-4 mb-4 flex flex-wrap gap-3">
         <input
@@ -86,7 +108,7 @@ export default function AdminSuspectsPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t("searchSuspect")}
-          className="flex-1 min-w-[200px] rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy"
+          className="flex-1 min-w-[180px] rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-navy"
         />
         <select
           value={genderFilter}
@@ -104,9 +126,7 @@ export default function AdminSuspectsPage() {
         >
           <option value="all">{t("filterByStatus")}: {t("all")}</option>
           {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {t(s === "not_here" ? "notHere" : s === "at_court" ? "atCourt" : s)}
-            </option>
+            <option key={s} value={s}>{statusLabel(t, s)}</option>
           ))}
         </select>
       </div>
@@ -131,17 +151,11 @@ export default function AdminSuspectsPage() {
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50">
-                    <td className="px-5 py-3 font-medium text-navy">{s.name}</td>
+                    <td className="px-5 py-3 font-semibold text-navy">{s.name}</td>
                     <td className="px-5 py-3">{t(s.gender === "male" ? "male" : "female")}</td>
                     <td className="px-5 py-3">
                       <span className={statusClass[s.status]}>
-                        {t(
-                          s.status === "not_here"
-                            ? "notHere"
-                            : s.status === "at_court"
-                            ? "atCourt"
-                            : s.status
-                        )}
+                        {statusLabel(t, s.status)}
                       </span>
                     </td>
                     <td className="px-5 py-3 text-slate-600">{visitCounts[s.id] ?? 0}</td>
@@ -149,21 +163,11 @@ export default function AdminSuspectsPage() {
                       <select
                         value={s.status}
                         disabled={updatingId === s.id}
-                        onChange={(e) =>
-                          updateStatus(s.id, e.target.value as SuspectStatus)
-                        }
+                        onChange={(e) => updateStatus(s.id, e.target.value as SuspectStatus)}
                         className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-navy disabled:opacity-50"
                       >
                         {STATUS_OPTIONS.map((opt) => (
-                          <option key={opt} value={opt}>
-                            {t(
-                              opt === "not_here"
-                                ? "notHere"
-                                : opt === "at_court"
-                                ? "atCourt"
-                                : opt
-                            )}
-                          </option>
+                          <option key={opt} value={opt}>{statusLabel(t, opt)}</option>
                         ))}
                       </select>
                     </td>

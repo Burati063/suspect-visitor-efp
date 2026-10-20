@@ -7,9 +7,10 @@ import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import type { Gender, SuspectStatus } from "@/lib/types";
 
 const STATUS_LIST: { value: SuspectStatus; icon: string }[] = [
+  { value: "available",   icon: "🟢" },
   { value: "not_here",    icon: "⚪" },
   { value: "at_court",   icon: "🔵" },
-  { value: "released",   icon: "🟢" },
+  { value: "released",   icon: "🟣" },
   { value: "transferred",icon: "🟡" },
 ];
 
@@ -51,6 +52,7 @@ export default function AddSuspectPage() {
   }
 
   function statusLabel(s: SuspectStatus) {
+    if (s === "available")   return t("available");
     if (s === "not_here")    return t("notHere");
     if (s === "at_court")    return t("atCourt");
     if (s === "released")    return t("released");
