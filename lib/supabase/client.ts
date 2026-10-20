@@ -1,11 +1,10 @@
-import { createBrowserClient } from "@supabase/ssr";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Browser-side Supabase client. Uses the anon key; Row Level Security
- * enforces permissions on the server side.
+ * Browser-side Supabase client — DB queries only, no auth.
  */
 export function createClient() {
-  return createBrowserClient(
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );

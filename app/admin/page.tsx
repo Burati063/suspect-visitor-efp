@@ -1,34 +1,64 @@
-import { createClient } from "@/lib/supabase/server";
-import { useTranslationServer } from "@/lib/i18n/server";
+"use client";
 
-export default async function AdminDashboard() {
-  const supabase = await createClient();
-  const { t } = useTranslationServer();
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useTranslation } from "@/lib/i18n/LanguageProvider";
 
-  const [
-    { count: totalSuspects },
-    { count: totalVisits },
-    { count: activeTickets },
-  ] = await Promise.all([
-    supabase.from("suspects").select("*", { count: "exact", head: true }),
-    supabase.from("visits").select("*", { count: "exact", head: true }),
-    supabase
-      .from("visits")
-      .select("*", { count: "exact", head: true })
-      .gt("ticket_expiry", new Date().toISOString()),
-  ]);
+interface RecentVisit {
+  id: string;
+  ticket_number: string;
+  qr_code_data: string;
+  visited_at: string;
+  suspects: unknown;
+}
 
-  const { data: recentVisits } = await supabase
-    .from("visits")
-    .select("id, ticket_number, qr_code_data, visited_at, ticket_status, suspects(name)")
-    .order("visited_at", { ascending: false })
-    .limit(10);
+export default function AdminDashboard() {
+  const t = useTranslation();
+  const [totalSuspects, setTotalSuspects]   = useState<number>(0);
+  const [totalVisits,   setTotalVisits]     = useState<number>(0);
+  const [activeTickets, setActiveTickets]   = useState<number>(0);
+  const [recentVisits,  setRecentVisits]    = useState<RecentVisit[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const supabase = createClient();
+      const [
+        { count: s },
+        { count: v },
+        { count: a },
+        { data: recent },
+      ] = await Promise.all([
+        supabase.from("suspects").select("*", { count: "exact", head: true }),
+        supabase.from("visits").select("*",   { count: "exact", head: true }),
+        supabase.from("visits").select("*",   { count: "exact", head: true })
+          .gt("ticket_expiry", new Date().toISOString()),
+        supabase.from("visits")
+          .select("id, ticket_number, qr_code_data, visited_at, suspects(name)")
+          .order("visited_at", { ascending: false })
+          .limit(10),
+      ]);
+      setTotalSuspects(s ?? 0);
+      setTotalVisits(v ?? 0);
+      setActiveTickets(a ?? 0);
+      setRecentVisits((recent as RecentVisit[]) ?? []);
+      setLoading(false);
+    }
+    load();
+  }, []);
 
   const stats = [
-    { label: t("totalSuspects"), value: totalSuspects ?? 0, color: "bg-blue-500" },
-    { label: t("totalVisits"),   value: totalVisits   ?? 0, color: "bg-emerald-500" },
-    { label: t("activeTickets"), value: activeTickets ?? 0, color: "bg-yellow-500" },
+    { label: t("totalSuspects"), value: totalSuspects, color: "bg-blue-500" },
+    { label: t("totalVisits"),   value: totalVisits,   color: "bg-emerald-500" },
+    { label: t("activeTickets"), value: activeTickets, color: "bg-yellow-500" },
   ];
+
+  function getSuspectName(v: RecentVisit) {
+    const s = v.suspects;
+    return (Array.isArray(s)
+      ? (s[0] as { name: string } | undefined)?.name
+      : (s as { name: string } | null)?.name) ?? t("unknown");
+  }
 
   return (
     <div>
@@ -39,7 +69,7 @@ export default async function AdminDashboard() {
         {stats.map((stat) => (
           <div key={stat.label} className="bg-white rounded-xl shadow p-5 flex items-center gap-4">
             <div className={`${stat.color} text-white rounded-lg w-14 h-14 flex items-center justify-center text-2xl font-bold`}>
-              {stat.value}
+              {loading ? "…" : stat.value}
             </div>
             <div className="text-sm text-slate-600 font-medium">{stat.label}</div>
           </div>
@@ -52,37 +82,31 @@ export default async function AdminDashboard() {
           {t("recentVisits")}
         </div>
         <div className="overflow-x-auto">
-          {recentVisits && recentVisits.length > 0 ? (
+          {loading ? (
+            <p className="px-5 py-8 text-center text-slate-400">{t("loading")}</p>
+          ) : recentVisits.length === 0 ? (
+            <p className="px-5 py-8 text-center text-slate-400">{t("noRecords")}</p>
+          ) : (
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="text-left px-5 py-3 font-medium">{t("ticketNumber")}</th>
                   <th className="text-left px-5 py-3 font-medium">{t("suspectName")}</th>
-                  <th className="text-left px-5 py-3 font-medium">{t("visitorName")}</th>
+                  <th className="text-left px-5 py-3 font-medium">{t("visitorName")} (QR)</th>
                   <th className="text-left px-5 py-3 font-medium">{t("timestamp")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {recentVisits.map((v) => {
-                  const row = v as Record<string, unknown>;
-                  const suspectArr = row.suspects;
-                  const suspectName = Array.isArray(suspectArr)
-                    ? (suspectArr[0] as { name: string } | undefined)?.name
-                    : (suspectArr as { name: string } | null)?.name;
-                  return (
-                    <tr key={row.id as string} className="hover:bg-slate-50">
-                      <td className="px-5 py-3 font-mono text-xs">{row.ticket_number as string}</td>
-                      <td className="px-5 py-3 font-medium text-navy">{suspectName ?? t("unknown")}</td>
-                      {/* QR code data IS the visitor identity */}
-                      <td className="px-5 py-3 font-mono text-xs text-slate-600">{row.qr_code_data as string}</td>
-                      <td className="px-5 py-3 text-slate-500">{new Date(row.visited_at as string).toLocaleString()}</td>
-                    </tr>
-                  );
-                })}
+                {recentVisits.map((v) => (
+                  <tr key={v.id} className="hover:bg-slate-50">
+                    <td className="px-5 py-3 font-mono text-xs">{v.ticket_number}</td>
+                    <td className="px-5 py-3 font-medium text-navy">{getSuspectName(v)}</td>
+                    <td className="px-5 py-3 font-mono text-sm font-semibold text-slate-700">{v.qr_code_data}</td>
+                    <td className="px-5 py-3 text-slate-500">{new Date(v.visited_at).toLocaleString()}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          ) : (
-            <p className="px-5 py-8 text-center text-slate-400">{t("noRecords")}</p>
           )}
         </div>
       </div>
