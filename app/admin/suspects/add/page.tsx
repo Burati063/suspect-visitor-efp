@@ -4,18 +4,25 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
-import type { Gender } from "@/lib/types";
+import type { Gender, SuspectStatus } from "@/lib/types";
+
+const STATUS_LIST: { value: SuspectStatus; icon: string }[] = [
+  { value: "not_here",    icon: "⚪" },
+  { value: "at_court",   icon: "🔵" },
+  { value: "released",   icon: "🟢" },
+  { value: "transferred",icon: "🟡" },
+];
 
 export default function AddSuspectPage() {
   const t = useTranslation();
   const router = useRouter();
 
-  const [name, setName] = useState("");
+  const [name,   setName]   = useState("");
   const [gender, setGender] = useState<Gender>("male");
-  const [notes, setNotes] = useState("");
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<SuspectStatus>("not_here");
+  const [error,  setError]  = useState("");
+  const [success,setSuccess]= useState(false);
+  const [loading,setLoading]= useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,34 +32,45 @@ export default function AddSuspectPage() {
       return;
     }
     setLoading(true);
+
     const supabase = createClient();
     const { error: insertError } = await supabase
       .from("suspects")
-      .insert({
-        name: name.trim(),
-        gender,
-        notes: notes.trim() || null,
-        status: "not_here",
-      });
+      .insert({ name: name.trim(), gender, status });
 
     setLoading(false);
+
     if (insertError) {
-      setError(t("addError"));
+      // Show the real error so we can diagnose RLS / schema issues
+      setError(`${t("addError")} (${insertError.message})`);
       return;
     }
+
     setSuccess(true);
-    setTimeout(() => router.push("/admin/suspects"), 800);
+    setTimeout(() => router.push("/admin/suspects"), 900);
+  }
+
+  function statusLabel(s: SuspectStatus) {
+    if (s === "not_here")    return t("notHere");
+    if (s === "at_court")    return t("atCourt");
+    if (s === "released")    return t("released");
+    if (s === "transferred") return t("transferred");
+    return s;
   }
 
   return (
     <div className="max-w-lg">
       <h1 className="text-2xl font-bold text-navy mb-6">{t("addSuspect")}</h1>
+
       <div className="bg-white rounded-xl shadow p-6">
-        <p className="text-sm text-slate-500 mb-5">{t("addSuspectPrompt")}</p>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <p className="text-sm text-slate-500 mb-6">{t("addSuspectPrompt")}</p>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+
+          {/* Name */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              {t("suspectName")} *
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+              {t("suspectName")} <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -62,52 +80,68 @@ export default function AddSuspectPage() {
               placeholder={t("suspectName")}
             />
           </div>
+
+          {/* Gender */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              {t("gender")} *
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+              {t("gender")} <span className="text-red-500">*</span>
             </label>
-            <div className="flex gap-3">
-              {(["male", "female"] as Gender[]).map((g) => (
+            <div className="grid grid-cols-2 gap-3">
+              {(["male","female"] as Gender[]).map((g) => (
                 <button
                   key={g}
                   type="button"
                   onClick={() => setGender(g)}
-                  className={`flex-1 rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
+                  className={`rounded-lg border-2 px-4 py-3 text-sm font-semibold transition-all ${
                     gender === g
-                      ? "bg-navy text-white border-navy"
-                      : "bg-white text-slate-700 border-slate-300 hover:border-navy"
+                      ? "border-navy bg-navy text-white shadow-md"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-navy/50"
                   }`}
                 >
-                  {t(g === "male" ? "man" : "woman")}
+                  {g === "male" ? "♂ " : "♀ "}{t(g === "male" ? "male" : "female")}
                 </button>
               ))}
             </div>
           </div>
+
+          {/* Status */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              {t("notes")}
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+              {t("status")} <span className="text-red-500">*</span>
             </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-navy"
-              placeholder={t("notes")}
-            />
+            <div className="grid grid-cols-2 gap-2">
+              {STATUS_LIST.map(({ value, icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setStatus(value)}
+                  className={`rounded-lg border-2 px-3 py-2.5 text-sm font-semibold transition-all text-left flex items-center gap-2 ${
+                    status === value
+                      ? "border-navy bg-navy text-white shadow-md"
+                      : "border-slate-200 bg-white text-slate-700 hover:border-navy/50"
+                  }`}
+                >
+                  <span>{icon}</span>
+                  {statusLabel(value)}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* Error / Success */}
           {error && (
-            <p className="text-sm text-red-600 bg-red-50 rounded-md px-3 py-2">
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
               {error}
-            </p>
+            </div>
           )}
           {success && (
-            <p className="text-sm text-green-700 bg-green-50 rounded-md px-3 py-2">
-              {t("suspectAdded")}
-            </p>
+            <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2.5">
+              ✓ {t("suspectAdded")}
+            </div>
           )}
 
-          <div className="flex gap-3">
+          {/* Buttons */}
+          <div className="flex gap-3 pt-1">
             <button
               type="submit"
               disabled={loading}
@@ -117,8 +151,8 @@ export default function AddSuspectPage() {
             </button>
             <button
               type="button"
-              onClick={() => router.back()}
-              className="rounded-lg border border-slate-300 text-slate-700 font-semibold px-5 hover:bg-slate-50"
+              onClick={() => router.push("/admin/suspects")}
+              className="rounded-lg border-2 border-slate-300 text-slate-700 font-semibold px-5 py-3 hover:bg-slate-50"
             >
               {t("cancel")}
             </button>
