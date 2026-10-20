@@ -7,89 +7,154 @@ interface QrScannerProps {
   active: boolean;
 }
 
+type ScanState = "requesting" | "scanning" | "error";
+
 export default function QrScanner({ onScan, active }: QrScannerProps) {
-  const scannerRef = useRef<import("html5-qrcode").Html5Qrcode | null>(null);
-  const [error, setError] = useState("");
-  const [started, setStarted] = useState(false);
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const doneRef   = useRef(false);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const [state,    setState]    = useState<ScanState>("requesting");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  function stopStream() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+  }
 
   useEffect(() => {
     if (!active) return;
 
-    let stopped = false;
+    doneRef.current = false;
+    setState("requesting");
+    setErrorMsg("");
+
+    let cancelled = false;
 
     async function start() {
       try {
-        // Dynamic import keeps this out of the SSR bundle (html5-qrcode uses browser APIs)
-        const { Html5Qrcode } = await import("html5-qrcode");
-        const html5Qrcode = new Html5Qrcode("qr-reader");
-        scannerRef.current = html5Qrcode;
+        const { BrowserQRCodeReader } = await import("@zxing/browser");
+        if (cancelled) return;
 
-        await html5Qrcode.start(
-          { facingMode: "environment" },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0,
-          },
-          (decodedText: string) => {
-            if (stopped) return;
-            stopped = true;
-            // Stop scanner before calling onScan so camera releases immediately
-            html5Qrcode
-              .stop()
-              .catch(() => {})
-              .finally(() => {
-                onScan(decodedText);
-              });
-          },
-          () => {
-            // Per-frame decode failure — normal while panning; ignore
+        const reader = new BrowserQRCodeReader();
+
+        // Get rear camera
+        const devices = await BrowserQRCodeReader.listVideoInputDevices();
+        const rearDevice = devices.find(
+          (d) =>
+            d.label.toLowerCase().includes("back") ||
+            d.label.toLowerCase().includes("rear") ||
+            d.label.toLowerCase().includes("environment")
+        );
+        const deviceId = rearDevice?.deviceId ?? devices[0]?.deviceId;
+
+        if (cancelled) return;
+        setState("scanning");
+
+        // decodeFromVideoDevice streams continuously and calls callback on each result
+        // We stop the stream manually once we have a result
+        await reader.decodeFromVideoDevice(
+          deviceId,
+          videoRef.current!,
+          (result, err, controls) => {
+            if (cancelled || doneRef.current) {
+              controls.stop();
+              stopStream();
+              return;
+            }
+            if (result) {
+              doneRef.current = true;
+              controls.stop();
+              stopStream();
+              onScan(result.getText());
+            }
+            void err; // per-frame no-result is normal
           }
         );
-        setStarted(true);
       } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Camera access error";
-        setError(msg);
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied") || msg.toLowerCase().includes("notallowed")) {
+          setErrorMsg("Camera permission denied. Tap the camera icon in your browser address bar, allow access, then reload.");
+        } else if (msg.toLowerCase().includes("notfound") || msg.toLowerCase().includes("devicenotfound")) {
+          setErrorMsg("No camera found on this device.");
+        } else if (msg.toLowerCase().includes("notreadable") || msg.toLowerCase().includes("trackstart")) {
+          setErrorMsg("Camera is in use by another app. Close it and try again.");
+        } else {
+          setErrorMsg(`Camera error: ${msg}`);
+        }
+        setState("error");
       }
     }
 
     start();
 
     return () => {
-      stopped = true;
-      const inst = scannerRef.current;
-      if (inst) {
-        inst
-          .stop()
-          .then(() => inst.clear())
-          .catch(() => {});
-        scannerRef.current = null;
-        setStarted(false);
-      }
+      cancelled = true;
+      stopStream();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
   return (
-    <div className="w-full">
-      {/* html5-qrcode mounts the video feed into this div */}
-      <div id="qr-reader" className="w-full rounded-xl overflow-hidden" />
+    <div className="w-full flex flex-col items-center gap-3">
 
-      {!error && !started && (
-        <div className="flex flex-col items-center gap-3 py-8 text-slate-500">
-          <div className="w-10 h-10 border-4 border-navy border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm">Starting camera…</p>
-        </div>
-      )}
+      {/* Camera feed */}
+      <div
+        className="relative w-full rounded-2xl overflow-hidden bg-black"
+        style={{ aspectRatio: "4/3" }}
+      >
+        {/* ZXing writes directly into this video element */}
+        <video
+          ref={videoRef}
+          className="w-full h-full object-cover"
+          playsInline
+          muted
+          autoPlay
+        />
 
-      {error && (
-        <div className="mt-3 rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
-          <p className="font-semibold mb-1">Camera error</p>
-          <p>{error}</p>
+        {/* Scan overlay — shown while camera is live */}
+        {state === "scanning" && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            {/* Dimmed border */}
+            <div className="absolute inset-0 bg-black/30" />
+            {/* Clear scan window */}
+            <div className="relative w-60 h-60 bg-transparent z-10">
+              {/* Corner brackets */}
+              <span className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-400 rounded-tl-md" />
+              <span className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-400 rounded-tr-md" />
+              <span className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-400 rounded-bl-md" />
+              <span className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-400 rounded-br-md" />
+              {/* Animated scan line */}
+              <div
+                className="absolute left-1 right-1 h-0.5 bg-green-400 opacity-90 rounded-full"
+                style={{ animation: "scanline 2s linear infinite" }}
+              />
+            </div>
+            <p className="absolute bottom-4 text-white text-xs font-medium bg-black/50 px-3 py-1 rounded-full">
+              Align QR code inside the box
+            </p>
+          </div>
+        )}
+
+        {/* Requesting overlay */}
+        {state === "requesting" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 gap-3">
+            <div className="w-10 h-10 border-4 border-white border-t-transparent rounded-full animate-spin" />
+            <p className="text-white text-sm font-medium">Starting camera…</p>
+          </div>
+        )}
+      </div>
+
+      {/* Error */}
+      {state === "error" && (
+        <div className="w-full rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+          <p className="font-semibold mb-1">📷 Camera error</p>
+          <p>{errorMsg}</p>
           <p className="mt-2 text-xs text-red-500">
-            Make sure you are on HTTPS and have allowed camera access in your
-            browser settings.
+            Requires HTTPS and camera permission. Make sure you opened the app
+            on <strong>https://</strong> and allowed camera access.
           </p>
         </div>
       )}

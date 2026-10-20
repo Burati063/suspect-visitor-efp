@@ -40,26 +40,19 @@ body {
   background: linear-gradient(135deg, #0a1f44 0%, #13316b 100%);
 }
 
-/* QR scanner container */
-#qr-reader {
-  width: 100% !important;
-  border-radius: 0.75rem;
-  overflow: hidden;
+/* QR scanner scan-line animation */
+@keyframes scan {
+  0%   { top: 0%; }
+  50%  { top: calc(100% - 2px); }
+  100% { top: 0%; }
 }
-#qr-reader video {
-  width: 100% !important;
-  border-radius: 0.75rem;
+.animate-scan {
+  animation: scan 2s linear infinite;
+  position: absolute;
 }
-#qr-reader__dashboard_section_csr button {
-  background-color: #0a1f44;
-  color: #fff;
-  border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-}
-#qr-reader__dashboard_section_swaplink {
-  color: #0a1f44;
-  font-weight: 600;
+
+@keyframes scanline {
+  0%   { top: 4px; }
+  50%  { top: calc(100% - 4px); }
+  100% { top: 4px; }
 }
