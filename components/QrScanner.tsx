@@ -1,161 +1,203 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 interface QrScannerProps {
   onScan: (decodedText: string) => void;
   active: boolean;
 }
 
-type ScanState = "requesting" | "scanning" | "error";
+type ScanState = "idle" | "decoding" | "success" | "error";
 
 export default function QrScanner({ onScan, active }: QrScannerProps) {
-  const videoRef  = useRef<HTMLVideoElement>(null);
-  const doneRef   = useRef(false);
-  const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef    = useRef<HTMLInputElement>(null);
+  const cameraInputRef  = useRef<HTMLInputElement>(null);
+  const canvasRef       = useRef<HTMLCanvasElement>(null);
 
-  const [state,    setState]    = useState<ScanState>("requesting");
+  const [state,    setState]    = useState<ScanState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [preview,  setPreview]  = useState<string | null>(null);
 
-  function stopStream() {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
+  if (!active) return null;
+
+  async function decodeImage(file: File) {
+    setState("decoding");
+    setErrorMsg("");
+    setPreview(null);
+
+    try {
+      // Show preview of chosen image
+      const objectUrl = URL.createObjectURL(file);
+      setPreview(objectUrl);
+
+      // Draw onto canvas then read pixels
+      const img = new Image();
+      img.src = objectUrl;
+      await new Promise<void>((resolve, reject) => {
+        img.onload  = () => resolve();
+        img.onerror = () => reject(new Error("Could not load image"));
+      });
+
+      const canvas = canvasRef.current!;
+      canvas.width  = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      URL.revokeObjectURL(objectUrl);
+
+      // Decode with jsQR
+      const jsQR = (await import("jsqr")).default;
+      const result = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "attemptBoth",
+      });
+
+      if (result && result.data) {
+        setState("success");
+        // Small delay so user sees the tick, then redirect
+        setTimeout(() => onScan(result.data), 600);
+      } else {
+        setState("error");
+        setErrorMsg(
+          "No QR code found in this image. Make sure the QR code is clear, well-lit, and fully visible, then try again."
+        );
+      }
+    } catch (err) {
+      setState("error");
+      setErrorMsg(err instanceof Error ? err.message : "Failed to read image.");
+    }
   }
 
-  useEffect(() => {
-    if (!active) return;
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so the same file can be selected again if needed
+    e.target.value = "";
+    decodeImage(file);
+  }
 
-    doneRef.current = false;
-    setState("requesting");
+  function retry() {
+    setState("idle");
     setErrorMsg("");
-
-    let cancelled = false;
-
-    async function start() {
-      try {
-        const { BrowserQRCodeReader } = await import("@zxing/browser");
-        if (cancelled) return;
-
-        const reader = new BrowserQRCodeReader();
-
-        // Get rear camera
-        const devices = await BrowserQRCodeReader.listVideoInputDevices();
-        const rearDevice = devices.find(
-          (d) =>
-            d.label.toLowerCase().includes("back") ||
-            d.label.toLowerCase().includes("rear") ||
-            d.label.toLowerCase().includes("environment")
-        );
-        const deviceId = rearDevice?.deviceId ?? devices[0]?.deviceId;
-
-        if (cancelled) return;
-        setState("scanning");
-
-        // decodeFromVideoDevice streams continuously and calls callback on each result
-        // We stop the stream manually once we have a result
-        await reader.decodeFromVideoDevice(
-          deviceId,
-          videoRef.current!,
-          (result, err, controls) => {
-            if (cancelled || doneRef.current) {
-              controls.stop();
-              stopStream();
-              return;
-            }
-            if (result) {
-              doneRef.current = true;
-              controls.stop();
-              stopStream();
-              onScan(result.getText());
-            }
-            void err; // per-frame no-result is normal
-          }
-        );
-      } catch (err) {
-        if (cancelled) return;
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied") || msg.toLowerCase().includes("notallowed")) {
-          setErrorMsg("Camera permission denied. Tap the camera icon in your browser address bar, allow access, then reload.");
-        } else if (msg.toLowerCase().includes("notfound") || msg.toLowerCase().includes("devicenotfound")) {
-          setErrorMsg("No camera found on this device.");
-        } else if (msg.toLowerCase().includes("notreadable") || msg.toLowerCase().includes("trackstart")) {
-          setErrorMsg("Camera is in use by another app. Close it and try again.");
-        } else {
-          setErrorMsg(`Camera error: ${msg}`);
-        }
-        setState("error");
-      }
-    }
-
-    start();
-
-    return () => {
-      cancelled = true;
-      stopStream();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
+    setPreview(null);
+  }
 
   return (
-    <div className="w-full flex flex-col items-center gap-3">
+    <div className="w-full flex flex-col items-center gap-4">
 
-      {/* Camera feed */}
-      <div
-        className="relative w-full rounded-2xl overflow-hidden bg-black"
-        style={{ aspectRatio: "4/3" }}
-      >
-        {/* ZXing writes directly into this video element */}
-        <video
-          ref={videoRef}
-          className="w-full h-full object-cover"
-          playsInline
-          muted
-          autoPlay
-        />
+      {/* Hidden canvas for image processing */}
+      <canvas ref={canvasRef} className="hidden" />
 
-        {/* Scan overlay — shown while camera is live */}
-        {state === "scanning" && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            {/* Dimmed border */}
-            <div className="absolute inset-0 bg-black/30" />
-            {/* Clear scan window */}
-            <div className="relative w-60 h-60 bg-transparent z-10">
-              {/* Corner brackets */}
-              <span className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-green-400 rounded-tl-md" />
-              <span className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-green-400 rounded-tr-md" />
-              <span className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-green-400 rounded-bl-md" />
-              <span className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-green-400 rounded-br-md" />
-              {/* Animated scan line */}
-              <div
-                className="absolute left-1 right-1 h-0.5 bg-green-400 opacity-90 rounded-full"
-                style={{ animation: "scanline 2s linear infinite" }}
+      {/* Hidden file inputs */}
+      {/* Gallery picker */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+      {/* Direct camera capture */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+
+      {/* Idle — show two buttons */}
+      {state === "idle" && (
+        <div className="w-full space-y-3">
+          {/* Camera button */}
+          <button
+            onClick={() => cameraInputRef.current?.click()}
+            className="w-full flex items-center justify-center gap-3 rounded-2xl bg-navy text-white py-5 text-base font-bold shadow-lg active:scale-95 transition-transform"
+          >
+            <span className="text-2xl">📷</span>
+            Take Photo with Camera
+          </button>
+
+          {/* Gallery button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full flex items-center justify-center gap-3 rounded-2xl bg-white border-2 border-navy text-navy py-5 text-base font-bold shadow active:scale-95 transition-transform"
+          >
+            <span className="text-2xl">🖼️</span>
+            Choose from Gallery
+          </button>
+
+          <p className="text-center text-xs text-slate-400 pt-1">
+            Take a photo of the QR code or select an existing image
+          </p>
+        </div>
+      )}
+
+      {/* Decoding — spinner + preview */}
+      {state === "decoding" && (
+        <div className="w-full flex flex-col items-center gap-4">
+          {preview && (
+            <div className="w-full rounded-2xl overflow-hidden border-2 border-slate-200 shadow">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={preview}
+                alt="QR preview"
+                className="w-full object-contain max-h-64"
               />
             </div>
-            <p className="absolute bottom-4 text-white text-xs font-medium bg-black/50 px-3 py-1 rounded-full">
-              Align QR code inside the box
-            </p>
+          )}
+          <div className="flex flex-col items-center gap-2">
+            <div className="w-10 h-10 border-4 border-navy border-t-transparent rounded-full animate-spin" />
+            <p className="text-navy font-semibold text-sm">Reading QR code…</p>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Requesting overlay */}
-        {state === "requesting" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 gap-3">
-            <div className="w-10 h-10 border-4 border-white border-t-transparent rounded-full animate-spin" />
-            <p className="text-white text-sm font-medium">Starting camera…</p>
+      {/* Success */}
+      {state === "success" && (
+        <div className="w-full flex flex-col items-center gap-3">
+          {preview && (
+            <div className="w-full rounded-2xl overflow-hidden border-2 border-green-300 shadow">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={preview}
+                alt="QR preview"
+                className="w-full object-contain max-h-64"
+              />
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-green-700 font-bold text-lg">
+            <span className="text-3xl">✓</span> QR Code Read!
           </div>
-        )}
-      </div>
+          <p className="text-xs text-slate-500">Saving visit…</p>
+        </div>
+      )}
 
       {/* Error */}
       {state === "error" && (
-        <div className="w-full rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
-          <p className="font-semibold mb-1">📷 Camera error</p>
-          <p>{errorMsg}</p>
-          <p className="mt-2 text-xs text-red-500">
-            Requires HTTPS and camera permission. Make sure you opened the app
-            on <strong>https://</strong> and allowed camera access.
-          </p>
+        <div className="w-full flex flex-col items-center gap-4">
+          {preview && (
+            <div className="w-full rounded-2xl overflow-hidden border-2 border-red-200 shadow">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={preview}
+                alt="QR preview"
+                className="w-full object-contain max-h-64"
+              />
+            </div>
+          )}
+          <div className="w-full rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+            <p className="font-semibold mb-1">❌ Could not read QR code</p>
+            <p>{errorMsg}</p>
+          </div>
+          <button
+            onClick={retry}
+            className="w-full rounded-xl bg-navy text-white py-3 font-bold text-sm active:scale-95 transition-transform"
+          >
+            Try Again
+          </button>
         </div>
       )}
     </div>

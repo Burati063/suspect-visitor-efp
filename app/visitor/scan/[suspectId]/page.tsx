@@ -136,13 +136,12 @@ export default function ScanPage() {
                 <span className="font-bold text-navy">{suspect.name}</span>
               </p>
             )}
-            <p className="text-xs text-slate-400 mt-2 px-4">{t("pointCamera")}</p>
+            <p className="text-xs text-slate-400 mt-2 px-4">
+              Take a photo of the visitor&apos;s QR code or choose from gallery
+            </p>
           </div>
           <div className="bg-white rounded-2xl shadow-lg p-4">
             <QrScanner onScan={handleScan} active={phase === "scanning"} />
-          </div>
-          <div className="mt-4 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-xs text-blue-700 text-center">
-            {t("cameraPermission")}
           </div>
         </div>
       )}
