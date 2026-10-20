@@ -2,7 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { getClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import type { Gender, Suspect, SuspectStatus } from "@/lib/types";
 import { canVisit } from "@/lib/types";
@@ -43,7 +43,7 @@ function SuspectsList() {
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const supabase = createClient();
+      const supabase = await getClient();
       const { data } = await supabase
         .from("suspects")
         .select("*")

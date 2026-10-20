@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { getClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import type { Gender, Suspect, SuspectStatus } from "@/lib/types";
 import { STATUS_OPTIONS } from "@/lib/types";
@@ -43,8 +43,8 @@ export default function AdminSuspectsPage() {
     setLoading(true);
     setError("");
     try {
-      const supabase = createClient();
-      const [{ data: sus, error: susErr }, { data: visits }] = await Promise.all([
+        const supabase = await getClient();
+        const [{ data: sus, error: susErr }, { data: visits }] = await Promise.all([
         supabase.from("suspects").select("*").order("created_at", { ascending: false }),
         supabase.from("visits").select("suspect_id"),
       ]);
@@ -66,7 +66,7 @@ export default function AdminSuspectsPage() {
 
   async function updateStatus(id: string, status: SuspectStatus) {
     setUpdatingId(id);
-    const supabase = createClient();
+    const supabase = await getClient();
     await supabase
       .from("suspects")
       .update({ status, updated_at: new Date().toISOString() })

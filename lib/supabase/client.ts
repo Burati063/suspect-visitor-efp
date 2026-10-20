@@ -1,29 +1,36 @@
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient as createSupabaseClient,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 
-const url  = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const key  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+let cachedClient: SupabaseClient | null = null;
+let configPromise: Promise<{ url: string; key: string }> | null = null;
 
-if (!url || !key) {
-  // This will appear in the browser console and in Vercel build logs.
-  // It means the env vars are not set in Vercel → Settings → Environment Variables.
-  console.error(
-    "[SVS] Supabase env vars missing!\n" +
-    "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel.\n" +
-    `URL present: ${!!url}, KEY present: ${!!key}`
-  );
+async function fetchConfig(): Promise<{ url: string; key: string }> {
+  if (configPromise) return configPromise;
+  configPromise = fetch("/api/config")
+    .then(async (res) => {
+      const body = await res.json();
+      if (!res.ok) {
+        configPromise = null;
+        throw new Error(body.error ?? `Config API error ${res.status}`);
+      }
+      return body as { url: string; key: string };
+    })
+    .catch((err) => {
+      configPromise = null;
+      throw err;
+    });
+  return configPromise;
 }
 
 /**
- * Browser-side Supabase client — no auth, DB queries only.
- * RLS policies are fully open (see supabase/migration.sql).
+ * Get (or create) the Supabase browser client.
+ * Always use: const supabase = await getClient();
  */
-export function createClient() {
-  if (!url || !key) {
-    throw new Error(
-      "Supabase is not configured. " +
-      "Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY " +
-      "in Vercel → Project Settings → Environment Variables, then redeploy."
-    );
-  }
-  return createSupabaseClient(url, key);
+export async function getClient(): Promise<SupabaseClient> {
+  if (cachedClient) return cachedClient;
+  const { url, key } = await fetchConfig();
+  cachedClient = createSupabaseClient(url, key);
+  return cachedClient;
 }

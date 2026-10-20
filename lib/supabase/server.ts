@@ -1,12 +1,12 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Server-side Supabase client — DB queries only, no auth.
- * Uses the anon key; RLS policies are set to fully open (see migration.sql).
+ * Server-side Supabase client.
+ * _SUPABASE_URL = renamed from NEXT_PUBLIC_SUPABASE_URL in Vercel to avoid public prefix warning.
+ * NEXT_PUBLIC_SUPABASE_ANON_KEY = kept as-is.
  */
 export async function createClient() {
-  return createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const url = process.env._SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  return createSupabaseClient(url, key);
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { getClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 import type { Gender, SuspectStatus } from "@/lib/types";
 
@@ -34,7 +34,7 @@ export default function AddSuspectPage() {
     }
     setLoading(true);
 
-    const supabase = createClient();
+    const supabase = await getClient();
     const { error: insertError } = await supabase
       .from("suspects")
       .insert({ name: name.trim(), gender, status });

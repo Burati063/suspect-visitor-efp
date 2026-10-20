@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { getClient } from "@/lib/supabase/client";
 import { useTranslation } from "@/lib/i18n/LanguageProvider";
 
 interface VisitRow {
@@ -23,7 +23,7 @@ export default function AdminVisitsPage() {
 
   const fetchVisits = useCallback(async () => {
     setLoading(true);
-    const supabase = createClient();
+    const supabase = await getClient();
     const { data } = await supabase
       .from("visits")
       .select("id, qr_code_data, visited_at, ticket_number, ticket_expiry, ticket_status, suspects(name)")
